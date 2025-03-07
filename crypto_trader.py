@@ -1558,8 +1558,9 @@ class CryptoTrader:
                     timeout=3,
                     silent=True
                 )
-                return
-
+            self.logger.info("找到amount_input")
+            # 清空输入框
+            amount_input.clear()
             # 输入新值
             amount_input.send_keys("1")
             time.sleep(0.5)
@@ -2900,35 +2901,52 @@ class CryptoTrader:
         """
         验证交易是否成功完成Returns:bool: 交易是否成功
         """
-        try:
-            # 首先验证浏览器状态
-            if not self.driver:
-                self.logger.error("浏览器连接已断开")
-                return False
-            # 等待并检查是否存在 Yes 标签
+        max_retries = 3  # 最大重试次数
+        for attempt in range(max_retries):
             try:
-                yes_element = self.driver.find_element(By.XPATH, XPathConfig.HISTORY)
+                # 首先验证浏览器状态
+                if not self.driver:
+                    self.logger.error("浏览器连接已断开")
+                    return False
+                # 等待并检查是否存在 Yes 标签
+                try:
+                    yes_element = self.driver.find_element(By.XPATH, XPathConfig.HISTORY)
+                except Exception as e:
+                    yes_element = self._find_element_with_retry(
+                        XPathConfig.HISTORY,
+                        timeout=3,
+                        silent=True
+                    )
+                text = yes_element.text
+                trade_type = re.search(r'\b(Bought)\b', text)  # 匹配单词 Bought
+                yes_match = re.search(r'\b(Yes)\b', text)  # 匹配单词 Yes
+                amount_match = re.search(r'\$(\d+\.?\d*)', text)  # 匹配 $数字 格式
+                
+                if trade_type.group(1) == "Bought" and yes_match.group(1) == "Yes":
+                    self.trade_type = trade_type.group(1)  # 获取 "Bought"
+                    self.buy_yes_value = yes_match.group(1)  # 获取 "Yes"
+                    self.buy_yes_amount = float(amount_match.group(1))  # 获取数字部分并转为浮点数
+                    self.logger.info(f"交易验证成功: {self.trade_type}-{self.buy_yes_value}-${self.buy_yes_amount}")
+                    return True
+
+                # 验证失败，记录日志并重试
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"验证买入YES失败,第{attempt+1}次尝试,将在1秒后重试")
+                    time.sleep(1)
+                else:
+                    self.logger.error(f"验证买入YES失败,已达到最大重试次数({max_retries}次)")
+                    return False
+
             except Exception as e:
-                yes_element = self._find_element_with_retry(
-                    XPathConfig.HISTORY,
-                    timeout=3,
-                    silent=True
-                )
-            text = yes_element.text
-            trade_type = re.search(r'\b(Bought)\b', text)  # 匹配单词 Bought
-            yes_match = re.search(r'\b(Yes)\b', text)  # 匹配单词 Yes
-            amount_match = re.search(r'\$(\d+\.?\d*)', text)  # 匹配 $数字 格式
-            
-            if trade_type.group(1) == "Bought" and yes_match.group(1) == "Yes":
-                self.trade_type = trade_type.group(1)  # 获取 "Bought"
-                self.buy_yes_value = yes_match.group(1)  # 获取 "Yes"
-                self.buy_yes_amount = float(amount_match.group(1))  # 获取数字部分并转为浮点数
-                self.logger.info(f"交易验证成功: {self.trade_type}-{self.buy_yes_value}-${self.buy_yes_amount}")
-                return True
-            return False       
-        except Exception as e:
-            self.logger.warning(f"Verify_buy_yes执行失败: {str(e)}")
-            return False
+                self.logger.warning(f"Verify_buy_yes执行失败: {str(e)}")
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"第{attempt+1}次尝试失败,将在1秒后重试")
+                    time.sleep(1)
+                else:
+                    self.logger.error(f"验证买入YES失败,已达到最大重试次数({max_retries}次)")
+                    return False
+
+        return False
         
     def Verify_buy_no(self):
         """
@@ -2936,36 +2954,53 @@ class CryptoTrader:
         Returns:
         bool: 交易是否成功
         """
-        try:
-            # 首先验证浏览器状态
-            if not self.driver:
-                self.logger.error("浏览器连接已断开")
-                return False
-            # 等待并检查是否存在 No 标签
+        max_retries = 3  # 最大重试次数
+        
+        for attempt in range(max_retries):
             try:
-                no_element = self.driver.find_element(By.XPATH, XPathConfig.HISTORY)
+                # 首先验证浏览器状态
+                if not self.driver:
+                    self.logger.error("浏览器连接已断开")
+                    return False
+                # 等待并检查是否存在 No 标签
+                try:
+                    no_element = self.driver.find_element(By.XPATH, XPathConfig.HISTORY)
+                except Exception as e:
+                    no_element = self._find_element_with_retry(
+                        XPathConfig.HISTORY,
+                        timeout=3,
+                        silent=True
+                    )
+                text = no_element.text
+
+                trade_type = re.search(r'\b(Bought)\b', text)  # 匹配单词 Bought
+                no_match = re.search(r'\b(No)\b', text)  # 匹配单词 No
+                amount_match = re.search(r'\$(\d+\.?\d*)', text)  # 匹配 $数字 格式
+
+                if trade_type.group(1) == "Bought" and no_match.group(1) == "No":
+                    self.trade_type = trade_type.group(1)  # 获取 "Bought"
+                    self.buy_no_value = no_match.group(1)  # 获取 "No"
+                    self.buy_no_amount = float(amount_match.group(1))  # 获取数字部分并转为浮点数
+                    self.logger.info(f"交易验证成功: {self.trade_type}-{self.buy_no_value}-${self.buy_no_amount}")
+                    return True
+
+                # 验证失败，记录日志并重试
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"验证买入NO失败,第{attempt+1}次尝试,将在1秒后重试")
+                    time.sleep(1)
+                else:
+                    self.logger.error(f"验证买入NO失败,已达到最大重试次数({max_retries}次)")
+                    return False
+
             except Exception as e:
-                no_element = self._find_element_with_retry(
-                    XPathConfig.HISTORY,
-                    timeout=3,
-                    silent=True
-                )
-            text = no_element.text
-
-            trade_type = re.search(r'\b(Bought)\b', text)  # 匹配单词 Bought
-            no_match = re.search(r'\b(No)\b', text)  # 匹配单词 No
-            amount_match = re.search(r'\$(\d+\.?\d*)', text)  # 匹配 $数字 格式
-
-            if trade_type.group(1) == "Bought" and no_match.group(1) == "No":
-                self.trade_type = trade_type.group(1)  # 获取 "Bought"
-                self.buy_no_value = no_match.group(1)  # 获取 "No"
-                self.buy_no_amount = float(amount_match.group(1))  # 获取数字部分并转为浮点数
-                self.logger.info(f"交易验证成功: {self.trade_type}-{self.buy_no_value}-${self.buy_no_amount}")
-                return True
-            return False        
-        except Exception as e:
-            self.logger.warning(f"Verify_buy_no执行失败: {str(e)}")
-            return False
+                self.logger.warning(f"Verify_buy_no执行失败: {str(e)}")
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"第{attempt+1}次尝试失败,将在1秒后重试")
+                    time.sleep(1)
+                else:
+                    self.logger.error(f"验证买入NO失败,已达到最大重试次数({max_retries}次)")
+                    return False  
+        return False
         
     def position_yes_cash(self):
         """获取当前持仓YES的金额"""
@@ -3753,7 +3788,7 @@ class CryptoTrader:
                                     self.start_url_monitoring()
                                     self.refresh_page()
                                 # 安排下一次找币
-                                schedule_next_find()
+                                self.schedule_next_find()
                             else:
                                 # 线程仍在运行，继续检查
                                 self.root.after(5000, check_find_thread)
