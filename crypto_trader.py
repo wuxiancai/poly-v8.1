@@ -14,7 +14,7 @@ import threading
 import time
 import os
 import logging
-
+import pytesseract
 from datetime import datetime, timezone, timedelta
 import re
 from selenium.webdriver.common.keys import Keys
@@ -857,7 +857,7 @@ class CryptoTrader:
 
         # 启动刷新页面
         self.first_refresh = True
-        self.refresh_timer = threading.Timer(240, safe_start, args=(self.refresh_page,))
+        self.refresh_timer = threading.Timer(100, safe_start, args=(self.refresh_page,))
         self.refresh_timer.daemon = True
         self.refresh_timer.start()
    
@@ -880,13 +880,7 @@ class CryptoTrader:
             if not self.driver:
                 chrome_options = Options()
                 chrome_options.debugger_address = "127.0.0.1:9222"
-                chrome_options.add_argument('--no-sandbox')
                 chrome_options.add_argument('--disable-dev-shm-usage')
-                 # 添加以下选项以解决SSL错误
-                chrome_options.add_argument('--ignore-certificate-errors')
-                chrome_options.add_argument('--ignore-ssl-errors')
-                chrome_options.add_argument('--disable-web-security')
-                chrome_options.add_argument('--allow-running-insecure-content')
                 
                 def init_browser():
                     try:
@@ -976,8 +970,11 @@ class CryptoTrader:
             if not self.driver:
                 chrome_options = Options()
                 chrome_options.debugger_address = "127.0.0.1:9222"
-                chrome_options.add_argument('--no-sandbox')
+                
                 chrome_options.add_argument('--disable-dev-shm-usage')
+                 # 添加以下选项以解决SSL错误
+                
+                
                 self.driver = webdriver.Chrome(options=chrome_options)
                 self.update_status("成功连接到浏览器")
 
@@ -1205,7 +1202,36 @@ class CryptoTrader:
         self.yes1_price_entry.insert(0, self.default_target_price)
         self.no1_price_entry.delete(0, tk.END)
         self.no1_price_entry.insert(0, self.default_target_price)
+    
+    def get_portfolio_value(self):
+        """获取Portfolio值"""
+        #设置重试参数
+        max_retry = 15
+        retry_count = 0
+        self.portfolio_value = None
 
+        while retry_count < max_retry:
+            try:
+                # 获取 portfolio 值
+                portfolio_text = self.portfolio_label.cget("text") 
+                # 使用正则表达式提取数字
+                portfolio_match = re.search(r'\$?([\d,]+\.?\d*)', portfolio_text)
+                if not portfolio_match:
+                    raise ValueError("无法从portfolio值中提取数字")
+                # 移除逗号并转换为浮点数
+                self.portfolio_value = float(portfolio_match.group(1).replace(',', ''))
+                self.logger.info(f"提取到portfolio值: {self.portfolio_value}")
+                return self.portfolio_value
+                
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retry:
+                    time.sleep(2)
+                else:
+                    raise ValueError("获取portfolio值失败")
+        if self.portfolio_value is None:
+            raise ValueError("获取portfolio值失败")
+       
     def set_yes_no_cash(self):
         """设置 Yes/No 各级金额"""
         if not hasattr(self, 'cash_initialized'):
@@ -1216,7 +1242,7 @@ class CryptoTrader:
             #设置重试参数
             max_retry = 15
             retry_count = 0
-            cash_value = None
+            self.cash_value = None
 
             while retry_count < max_retry:
                 try:
@@ -1227,8 +1253,8 @@ class CryptoTrader:
                     if not cash_match:
                         raise ValueError("无法从Cash值中提取数字")
                     # 移除逗号并转换为浮点数
-                    cash_value = float(cash_match.group(1).replace(',', ''))
-                    self.logger.info(f"提取到Cash值: {cash_value}")
+                    self.cash_value = float(cash_match.group(1).replace(',', ''))
+                    self.logger.info(f"提取到Cash值: {self.cash_value}")
                     break
                 except Exception as e:
                     retry_count += 1
@@ -1236,7 +1262,7 @@ class CryptoTrader:
                         time.sleep(2)
                     else:
                         raise ValueError("获取Cash值失败")
-            if cash_value is None:
+            if self.cash_value is None:
                 raise ValueError("获取Cash值失败")
             
             # 获取金额设置中的百分比值
@@ -1245,7 +1271,7 @@ class CryptoTrader:
             n_rebound_percent = float(self.n_rebound_entry.get()) / 100  # 反水N次百分比
 
             # 设置 Yes1 和 No1金额
-            base_amount = cash_value * initial_percent
+            base_amount = self.cash_value * initial_percent
             self.yes1_entry = self.yes_frame.grid_slaves(row=1, column=1)[0]
             self.yes1_amount_entry.delete(0, tk.END)
             self.yes1_amount_entry.insert(0, f"{base_amount:.2f}")
@@ -1373,6 +1399,7 @@ class CryptoTrader:
                 self.url_check_timer = None
                 if hasattr(self, 'is_url_monitoring'):
                     self.is_url_monitoring = False
+
     def find_login_button(self):
         """查找登录按钮"""
         # 使用静默模式查找元素，并添加空值检查
@@ -1461,45 +1488,8 @@ class CryptoTrader:
             screen = pyautogui.screenshot()
             
             # 使用OCR识别文本
-            import pytesseract
-            text = pytesseract.image_to_string(screen, lang='chi_sim')
             
-            def after_check_and_handle_login():
-                #再次检查是否登录成功
-                try:
-                    login_button = self.driver.find_element(By.XPATH, XPathConfig.LOGIN_BUTTON)
-                except Exception as e:
-                    login_button = self._find_element_with_retry(
-                            XPathConfig.LOGIN_BUTTON,
-                            timeout=3,
-                            silent=True
-                    )
-                    
-                # 添加空值检查和安全访问
-                if login_button is not None and "Log In" in login_button.text:
-                    self.logger.warning("检测到未登录状态，执行自动登录...")
-                    self.check_and_handle_login()
-                else:
-                    # 正常状态无需记录日志
-                    pass
-
-                if self.driver:       
-                    # 直接执行click_accept_button
-                    self.logger.info("登录完成,执行click_accept_button")
-                    time.sleep(1)                                        
-
-                    self.driver.refresh()
-                    time.sleep(1)
-                    self.click_accept_button()
-                    
-                    # 恢复URL监控和页面刷新和自动找币
-                    self.start_url_monitoring()
-                    self.refresh_page()
-                    self.auto_find_54_coin()
-                    return True
-                else:
-                    self.logger.error("执行click_accept_button失败")
-                    return False
+            text = pytesseract.image_to_string(screen, lang='chi_sim')
             
             # 检查是否包含"欢迎回来!"
             if "欢迎回来" in text:
@@ -1515,8 +1505,12 @@ class CryptoTrader:
                     pyautogui.press('tab')
                 # 按下Enter键
                 pyautogui.press('enter')
+                self.logger.info("MetaMask登录成功")
 
-                after_check_and_handle_login()
+                # 恢复URL监控和页面刷新和自动找币
+                self.root.after(10000, self.start_url_monitoring)
+                self.root.after(30000, self.refresh_page)
+                self.root.after(60000, self.auto_find_54_coin)
                 return
             
             # 处理 MetaMask 弹窗
@@ -1538,8 +1532,24 @@ class CryptoTrader:
             
             # 等待弹窗自动关闭
             time.sleep(1)
-            
-            after_check_and_handle_login()
+
+            if self.driver:       
+                # 直接执行click_accept_button
+                self.logger.info("登录完成,执行click_accept_button")
+                time.sleep(1)                                        
+
+                self.driver.refresh()
+                time.sleep(1)
+                self.click_accept_button()
+                
+                # 恢复URL监控和页面刷新和自动找币
+                self.root.after(10000, self.start_url_monitoring)
+                self.root.after(240000, self.refresh_page)
+                self.root.after(120000, self.auto_find_54_coin)
+                return 
+            else:
+                self.logger.error("执行click_accept_button失败")
+                return False
             
         except Exception as e:
             self.logger.error(f"登录操作失败: {str(e)}")
@@ -1582,7 +1592,6 @@ class CryptoTrader:
             self.click_accept_button()
 
     # 添加刷新方法
-   
     def refresh_page(self):
         """定时刷新页面"""
         try:
@@ -1615,13 +1624,13 @@ class CryptoTrader:
                         try:
                             # 使用更轻量级的方式刷新页面
                             self.driver.execute_script("location.reload(true);")
-                            self.logger.info("使用JavaScript刷新页面成功")
+                            self.logger.info("✅ 刷新页面成功")
                         except Exception as js_e:
                             self.logger.error(f"JavaScript刷新失败: {str(js_e)}")
                             try:
                                 # 如果JavaScript刷新失败，尝试使用更简单的方法
                                 self.driver.get(self.driver.current_url)
-                                self.logger.info("使用get方法刷新页面成功")
+                                self.logger.info("✅ 使用get方法刷新页面成功")
                             except Exception as e:
                                 self.logger.error(f"页面刷新失败: {str(e)}")
                     
@@ -3470,6 +3479,7 @@ class CryptoTrader:
         except Exception as e:
             self.logger.error(f"程序运行出错: {str(e)}")
             raise
+
     """以下代码是自动找币的函数,从第 3191 行到第 3250 行"""
     def is_position_yes_or_no(self):
         self.logger.info("检查当前是否持仓")
@@ -3492,8 +3502,23 @@ class CryptoTrader:
             
         except Exception as e:
             self.logger.error(f"持仓检查异常: {str(e)}")
-            # 出现异常时默认返回True（保守策略防止重复开仓）
-            return True
+
+        return True
+            
+    def contrast_portfolio_cash(self):
+        """对比持仓币对和现金"""
+        try:
+            value = self.get_portfolio_value() - self.cash_value
+
+            if value > 2 or value < 0:
+                
+                return True
+            else:
+                return False
+            
+        except Exception as e:
+            self.logger.error(f"持仓币对和现金对比异常: {str(e)}")
+            return False
         
     def is_saturday_auto_update_weekly_url_time(self):
         """判断是否处于周六凌晨3-8点的自动更新时间窗口"""
@@ -3745,76 +3770,120 @@ class CryptoTrader:
         self.stop_auto_find = False
         self.auto_find_running = True  # 添加运行状态标志
 
-        # 使用非阻塞方式检查重启状态
-        def check_restart_and_continue():
+        if self.contrast_portfolio_cash():
+            self.logger.info("通过 PORTFOLIO/CASH 检测到有持仓")
+            
+            self.stop_url_monitoring()
+            
+            self.stop_refresh_page()
+            
+            time.sleep(3)
+            
+            try:
+                portfolio_button = self.driver.find_element(By.XPATH, XPathConfig.PORTFOLIO_BUTTON)
+            except Exception as e:
+                portfolio_button = self._find_element_with_retry(
+                    XPathConfig.PORTFOLIO_BUTTON,
+                    timeout=3,
+                    silent=True
+                )
+            portfolio_button.click()
+
+            # 模拟键盘敲击 29 下 TAB 键
+            for _ in range(29):
+                pyautogui.press('tab')
+                
+            # 模拟键盘敲击 1 下 ENTER 键
+            pyautogui.press('enter')
+            time.sleep(2)
+            # 获取当前URL
+            current_url = self.driver.current_url
+            self.logger.info(f"当前URL: {current_url}")
+            # 如果 current_url里包含"event"，则保存URL
+            if "event" in current_url:
+                # 保存当前窗口句柄
+                current_window_hanle = self.driver.current_window_handle
+                self.driver.switch_to.window(current_window_hanle)
+                self.config['website']['url'] = current_url
+                self.save_config()
+                self.target_url = current_url
+                self.start_url_monitoring()   
+                self.refresh_page()
+            else:
+                self.logger.info("未找到持仓地址URL,继续找!")
+                self.auto_find_54_coin()
+        else:
+            self.continue_auto_find()
+
+    def check_restart_and_continue(self):
             if self.check_restart():
                 self.logger.info("检测到重启模式,等待10分钟后重试")
                 # 使用after代替sleep，避免阻塞
-                self.root.after(600000, continue_auto_find)
+                self.root.after(600000, self.continue_auto_find)
                 return False
             return True
-         # 主要找币逻辑
-        def continue_auto_find():
-            if self.stop_auto_find or not self.running:
-                self.auto_find_running = False
-                self.logger.info("auto_find_54_coin已停止")
-                return
+    
+    def continue_auto_find(self):
+        if self.stop_auto_find or not self.running:
+            self.auto_find_running = False
+            self.logger.info("auto_find_54_coin已停止")
+            return
+        
+        if not self.check_restart_and_continue():
+            return
 
-            if not check_restart_and_continue():
-                return
-            if not self.is_position_yes_or_no():
-                try:
-                    # 停止URL监控
-                    self.stop_url_monitoring()
-                    self.stop_refresh_page()
-                    time.sleep(1)
+        # 检查到YES/NO 和 PORTFOLIO/CASH都没有持仓
+        if not self.is_position_yes_or_no():
+            try:
+                # 停止URL监控
+                self.stop_url_monitoring()
+                self.stop_refresh_page()
+                time.sleep(1)
 
-                    # 检查是否被要求停止
-                    if self.stop_auto_find:
-                        self.logger.info("检测到停止标志,auto_find_54_coin线程退出")
-                        return
+                # 检查是否被要求停止
+                if self.stop_auto_find:
+                    self.logger.info("检测到停止标志,auto_find_54_coin线程退出")
+                    return
 
-                    if self.is_auto_find_54_coin_time():# 判断是否处于自动找币时段
-                        self.logger.info("开始循环找币!")
-                        # 启动找币线程，不使用join阻塞
-                        find_thread = threading.Thread(target=self.find_54_coin, daemon=True)
-                        find_thread.start()
-                        # 使用定时器检查找币线程是否完成
-                        def check_find_thread():
-                            if not find_thread.is_alive():
-                                # 找币完成，恢复监控
-                                if not self.stop_auto_find and not self.is_url_monitoring:
-                                    self.logger.info("✅ 找币完成,已恢复URL监控")
-                                    self.start_url_monitoring()
-                                    self.refresh_page()
-                                # 安排下一次找币
-                                self.schedule_next_find()
-                            else:
-                                # 线程仍在运行，继续检查
-                                self.root.after(5000, check_find_thread)
-                        # 启动线程检查
-                        self.root.after(5000, check_find_thread)
-                    else:
-                        self.logger.debug("当前不在自动找币时段")
-                        # 恢复监控并安排下一次找币
-                        if not self.is_url_monitoring:
-                            self.start_url_monitoring()
-                            self.refresh_page()
-                        self.schedule_next_find()
-                except Exception as e:
-                    self.logger.error(f"自动找币异常: {str(e)}")
+                if self.is_auto_find_54_coin_time():# 判断是否处于自动找币时段
+                    self.logger.info("开始循环找币!")
+                    # 启动找币线程，不使用join阻塞
+                    find_thread = threading.Thread(target=self.find_54_coin, daemon=True)
+                    find_thread.start()
+                    # 使用定时器检查找币线程是否完成
+                    def check_find_thread():
+                        if not find_thread.is_alive():
+                            # 找币完成，恢复监控
+                            if not self.stop_auto_find and not self.is_url_monitoring:
+                                self.logger.info("✅ 找币完成,已恢复URL监控")
+                                self.start_url_monitoring()
+                                self.refresh_page()
+                            # 安排下一次找币
+                            self.schedule_next_find()
+                        else:
+                            # 线程仍在运行，继续检查
+                            self.root.after(5000, check_find_thread)
+                    # 启动线程检查
+                    self.root.after(5000, check_find_thread)
+                else:
+                    self.logger.debug("当前不在自动找币时段")
                     # 恢复监控并安排下一次找币
-                    if not self.stop_auto_find and not self.is_url_monitoring:
+                    if not self.is_url_monitoring:
                         self.start_url_monitoring()
                         self.refresh_page()
-                    self.schedule_next_find()         
-            else:
-                self.logger.info("当前持仓，停止找币")
-                self.schedule_next_find()
-        # 保存continue_auto_find引用，以便在其他地方使用
-        self.continue_auto_find = continue_auto_find
-        # 开始执行
-        continue_auto_find()
+                    self.schedule_next_find()
+
+            except Exception as e:
+                self.logger.error(f"自动找币异常: {str(e)}")
+                # 恢复监控并安排下一次找币
+                if not self.stop_auto_find and not self.is_url_monitoring:
+                    self.start_url_monitoring()
+                    self.refresh_page()
+                self.schedule_next_find()      
+        else:
+            self.logger.info("当前持仓，停止找币")
+            self.schedule_next_find()
+
     # 安排下一次找币
     def schedule_next_find(self):
         if self.stop_auto_find or not self.running:
