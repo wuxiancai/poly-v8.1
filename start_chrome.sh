@@ -90,12 +90,7 @@ echo -e "${YELLOW}正在启动Chrome...${NC}"
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     --remote-debugging-port=9222 \
     --user-data-dir="$HOME/ChromeDebug" \
-    --no-sandbox \
     --disable-dev-shm-usage \
-    --ignore-certificate-errors \
-    --ignore-ssl-errors \
-    --disable-web-security \
-    --allow-running-insecure-content \
     "https://polymarket.com/markets/crypto" 2>/dev/null &
 
 echo -e "${GREEN}Chrome已成功启动!${NC}"

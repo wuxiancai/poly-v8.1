@@ -146,3 +146,8 @@ class XPathConfig:
         'input#markets-grid-search-input',
         'input[placeholder="Search by market"]'
     ] 
+
+    # 22.Portfolio_button
+    PORTFOLIO_BUTTON = [
+        '//a[@href="/portfolio"]' # 长期有效
+    ]
